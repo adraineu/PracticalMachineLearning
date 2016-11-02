@@ -1,0 +1,118 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Adraine Upshaw"
+date: "October 29, 2016"
+output: 
+  html_document: 
+    keep_md: yes
+fontsize: 10pt
+---
+Synopsis: 
+-------------------------------------
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, I will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. Participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways(classe variable). The project will outline the steps used to develop a prediction model for the 5 different ways. 
+More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+Data Processing (loading and preprocessing the data):
+-----------------------------------------------------
+```{r,echo=TRUE, warning=FALSE, message=FALSE ,  fig.width = 10, fig.height = 10, cache=FALSE,}
+options(scipen = 2, digits = 0)
+setwd("~/DataScience/Pratical Machine Learning")
+#setwd("H:/DataScientist/practical-machine-learning")
+library(caret); library(rattle); library(rpart); library(rpart.plot)
+library(randomForest);library(gbm);library(ggplot2)
+library(plyr);library(knitr) 
+if(!file.exists("./data")){dir.create("./data")}
+fileUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+if (!file.exists("./data/pml-training.csv")) {download.file(fileUrl, destfile ="./data/pml-training.csv")
+}
+training <- read.csv("./data/pml-training.csv", header = TRUE, 
+                         na.strings = c("","NA","#DIV/0!"))
+
+fileUrl2 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+if (!file.exists("./data/pml-testing.csv")) {download.file(fileUrl2, destfile ="./data/pml-testing.csv")
+}
+testing <- read.csv("./data/pml-testing.csv", header = TRUE, 
+                    na.strings = c("","NA","#DIV/0!"))
+str(training)
+summary(training)
+```
+Variables that are mosting missing and near zero variance are removed, along with several id-type variable. Data will be split into training and validation data frames for model building and evaluation
+```{r,echo=TRUE, warning=FALSE, message=FALSE,cache=FALSE}
+#remove X variable and other ID variables
+training2 <- training[,-c(1:7)]
+ncol(training);ncol(training2)
+#remove columns with more than 50% NA values
+training3=training2[, colSums(is.na(training2)) <= nrow(training2) * 0.5]
+ncol(training2);ncol(training3)
+
+#remove columns with zero variance
+nzv <-nearZeroVar(training3, saveMetrics= TRUE)
+training4 <- training3[, nzv$nzv==FALSE]
+ncol(training3);ncol(training4)
+str(training4)
+
+#create validation set
+set.seed(67915)
+inTrain = createDataPartition(training4$classe, p = 3/4)[[1]]
+training5 = training4[ inTrain,]
+validation = training4[-inTrain,]
+
+```
+Model Selection
+-------------------------------------
+Three model prediction methods will be compared: Decision Tree, Random Forest, and Boosting
+```{r,echo=TRUE, warning=FALSE, message=FALSE, fig.width = 10, fig.height = 10}
+#Decision Tree
+model1 <- train(classe~., data=training5, method="rpart")
+varImp_tree <- varImp(model1)
+varImp_tree
+fancyRpartPlot(model1$finalModel)
+#print(model1$finalModel)
+predtree <- predict(model1,newdata =validation)
+confusionMatrix(predtree,validation$classe)
+##was model overfit?
+tree <- predict(model1,newdata =training5)
+confusionMatrix(tree,training5$classe)$overall
+###no, accuracy equal on training and validation
+```
+
+```{r,echo=TRUE, warning=FALSE, message=FALSE,fig.width = 10, fig.height = 10, cache=TRUE,eval=TRUE}
+#Random Forest
+library(randomForest)
+model2 <- randomForest(as.factor(classe) ~ ., data=training5)
+order(varImp(model2), decreasing = T)
+varImpPlot(model2,type=2)
+##Reference:https://www.r-bloggers.com/variable-importance-plot-and-variable-selection/
+predrf <- predict(model2,newdata =validation)
+confusionMatrix(predrf,validation$classe)
+confusionMatrix(predrf,validation$classe)$overall
+##plot top 15 variables
+importanceOrder=order(-model2$importance)
+names=rownames(model2$importance)[importanceOrder][1:15]
+#Random Forest on reduced number of variables
+training6=subset(training5,select=c("classe",names))
+model3 <- randomForest(classe~., data=training6)
+varImpPlot(model3,type=2)
+predrf2 <- predict(model3,newdata =validation)
+confusionMatrix(predrf2,validation$classe)$overall
+```
+
+```{r,echo=TRUE, warning=FALSE, message=FALSE, cache=TRUE}
+#Boosting - creating a smaller data frame to run procedure
+inTrain2 = createDataPartition(training5$classe, p = .3)[[1]]
+training7 = training5[ inTrain2,]
+model4 <- train(classe~., data = training7, method = "gbm")
+predgbm <- predict(model4,newdata =validation)
+confusionMatrix(predgbm,validation$classe)$overall
+
+```
+
+Results
+-------------------------------------
+The Random Forest Model has the largest accuracy=`r confusionMatrix(predrf2,validation$classe)$overall[1]`; therefore it is chosen to predict the testing data set
+```{r,echo=TRUE, warning=FALSE, message=FALSE, cache=FALSE}
+
+testing2=subset(testing,select=c(names))
+Test_cases <- predict(model3,newdata =testing2)
+data.frame(Test_cases)
+```
